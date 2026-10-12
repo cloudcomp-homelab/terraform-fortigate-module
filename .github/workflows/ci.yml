@@ -1,0 +1,95 @@
+# ============================================================
+# CI - VALIDATE, LINT & SECRET SCAN (no FortiGate connection)
+# ============================================================
+name: ci
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  TERRAFORM_VERSION: 1.16.5
+  TF_IN_AUTOMATION: true
+
+jobs:
+  # ============================================================
+  # JOB 1 - TERRAFORM FMT & VALIDATE
+  # ============================================================
+  validate:
+    name: Terraform fmt & validate
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TERRAFORM_VERSION }}
+          terraform_wrapper: false
+
+      - name: Terraform fmt
+        run: terraform fmt -check -recursive
+
+      - name: Terraform validate (all modules and examples)
+        run: |
+          for dir in modules/address modules/vip modules/policy examples/homelab; do
+            echo "::group::Validate $dir"
+            terraform -chdir="$dir" init -backend=false -input=false
+            terraform -chdir="$dir" validate
+            echo "::endgroup::"
+          done
+
+  # ============================================================
+  # JOB 2 - TFLINT (best practices)
+  # ============================================================
+  tflint:
+    name: TFLint
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Setup TFLint
+        uses: terraform-linters/setup-tflint@v4
+
+      - name: TFLint init
+        run: tflint --init
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+
+      - name: TFLint
+        run: tflint --recursive --config "$GITHUB_WORKSPACE/.tflint.hcl"
+
+  # ============================================================
+  # JOB 3 - SECRET SCAN (Gitleaks) + publish report
+  # ============================================================
+  gitleaks:
+    name: Secret scan (Gitleaks)
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      security-events: write   # required to upload the report to Code scanning
+    steps:
+      - name: Checkout (full history)
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: Gitleaks scan
+        run: |
+          docker run --rm -v "$GITHUB_WORKSPACE:/repo" zricethezav/gitleaks:v8.21.2 \
+            git /repo --report-format sarif --report-path /repo/gitleaks.sarif --exit-code 1
+
+      - name: Upload report to Code scanning
+        if: always()
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: gitleaks.sarif
+          category: gitleaks
