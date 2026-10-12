@@ -1,7 +1,8 @@
-# ============================================================
-# TFLINT CONFIGURATION
-# ============================================================
-plugin "terraform" {
-  enabled = true
-  preset  = "recommended"
-}s
+   # ============================================================
+   # TFLINT CONFIGURATION
+   # ============================================================
+   plugin "terraform" {
+     enabled = true
+     preset  = "recommended"
+   }
+   
